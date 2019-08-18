@@ -36,6 +36,8 @@ from ZODB.utils import p64
 from ZODB.utils import u64
 from ZODB.loglevels import TRACE
 
+from relstorage._compat import MAC
+
 logger = __import__('logging').getLogger(__name__)
 perf_logger = logger.getChild('timing')
 
@@ -48,6 +50,7 @@ __all__ = [
     'timestamp_at_unixtime',
     'timer',
     'log_timed',
+    'log_timed_only_self',
     'thread_spawn',
     'spawn',
     'get_memory_usage',
@@ -116,6 +119,13 @@ _LOG_TIMED_DEFAULT_DURATIONS = (
     )
 _LOG_TIMED_DEFAULT_DETAILS_THRESHOLD = WARN
 
+_LOG_TIMED_COMPILETIME_ENABLE = True
+
+if 'zope-testrunner' in sys.argv[0] and MAC:
+    # Disable the actual wrapping to get it out of stack traces
+    # and make debugging easier.
+    _LOG_TIMED_COMPILETIME_ENABLE = False
+
 def do_log_duration_info(basic_msg, func,
                          args, kwargs,
                          actual_duration,
@@ -176,7 +186,7 @@ def log_timed(func):
     func.log_levels = _LOG_TIMED_DEFAULT_DURATIONS
     func.log_details_threshold = _LOG_TIMED_DEFAULT_DETAILS_THRESHOLD
 
-    return f
+    return f if _LOG_TIMED_COMPILETIME_ENABLE else func
 
 def log_timed_only_self(func):
     func.log_args_only_self = 1

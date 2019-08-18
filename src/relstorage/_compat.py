@@ -68,6 +68,7 @@ if PY3:
     string_types = (str,)
     unicode = str
     number_types = (int, float)
+    from collections import ChainMap
     from io import StringIO as NStringIO
     from perfmetrics import metricmethod
     from perfmetrics import Metric
@@ -76,6 +77,7 @@ else:
     string_types = (basestring,)
     unicode = unicode
     number_types = (int, long, float)
+    from chainmap import ChainMap # pylint:disable=import-error
     from io import BytesIO as NStringIO
     # On Python 2, functools.update_wrapper doesn't set the '__wrapped__'
     # attribute, and we need that.

@@ -193,7 +193,8 @@ class RelStorage(LegacyMethodsMixin,
         self._load_connection = LoadConnection(self._adapter.connmanager)
         self._load_connection.on_first_use = self.__on_load_first_use
         self.__queued_changes = OID_SET_TYPE()
-        self._store_connection = StoreConnection(self._adapter.connmanager)
+        if not self._is_read_only:
+            self._store_connection = StoreConnection(self._adapter.connmanager)
 
         if cache is not None:
             self._cache = cache
@@ -270,16 +271,19 @@ class RelStorage(LegacyMethodsMixin,
             self._cache
         )
 
-    def new_instance(self):
+    def new_instance(self, before=None):
         """Creates and returns another storage instance.
 
         See ZODB.interfaces.IMVCCStorage.
         """
+        options = self._options
+        if before and not self._options.read_only:
+            options = self._options.new_instance(read_only=True)
         adapter = self._adapter.new_instance()
-        cache = self._cache.new_instance()
+        cache = self._cache.new_instance(before=before)
         blobhelper = self.blobhelper.new_instance(adapter=adapter)
         other = type(self)(adapter=adapter, name=self.__name__,
-                           create=False, options=self._options, cache=cache,
+                           create=False, options=options, cache=cache,
                            blobhelper=blobhelper)
         # NOTE: We're depending on the GIL (or list implementation)
         # for thread safety here.
@@ -295,15 +299,36 @@ class RelStorage(LegacyMethodsMixin,
         return other
 
     def before_instance(self, before):
-        # Implement this method of MVCCAdapterInstance
-        # (possibly destined for IMVCCStorage) as a small optimization
-        # in ZODB5 that can eventually simplify ZODB.Connection.Connection
-        # XXX: 5.0a2 doesn't forward the release method, so we leak
-        # open connections.
-        i = self.new_instance()
+        """
+        Return a historical connection for the given *before* tid.
+
+        The connection is read-only, and that is enforced at this level.
+        """
+        # XXX This might need some work to better adapt the cache? We
+        # can *know* that we're pinned to see older transactions, so
+        # our TID doesn't need to move forward, and we don't need to
+        # poll. We're read-only so we'll never be joined to a
+        # transaction or commit, we'll never have invalidations. The
+        # HistoricalStorageAdapter blocks sync() and
+        # poll_invalidations() from being called on this instance, but
+        # our load connection is going to do that automatically the
+        # first time it's accessed after a transaction
+        # rollback...which, since we're not joined to a transaction,
+        # should never happen...except for afterCompletion(), which
+        # the ZODB connection has called on it for every transaction
+        # whether it's joined or not. So we *will* rollback the
+        # connection and then open it and poll on the next load.
+
+        i = self.new_instance(before=before)
         x = HistoricalStorageAdapter(i, before)
-        x.release = i.release
         return x
+
+    @property
+    def highest_visible_tid(self):
+        cache_tid = self._cache.highest_visible_tid or 0
+        committed_tid = bytes8_to_int64(self._ltid)
+        # In case we haven't polled yet.
+        return max(cache_tid, committed_tid)
 
     def zap_all(self, **kwargs):
         """Clear all objects and transactions out of the database.
